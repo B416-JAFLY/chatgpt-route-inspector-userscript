@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT 路由检测器 · 油猴版
 // @namespace    https://github.com/B416-JAFLY/chatgpt-route-inspector-userscript
-// @version      1.0.0
+// @version      1.1.0
 // @homepageURL  https://github.com/B416-JAFLY/chatgpt-route-inspector-userscript
 // @supportURL   https://github.com/B416-JAFLY/chatgpt-route-inspector-userscript/issues
 // @downloadURL  https://raw.githubusercontent.com/B416-JAFLY/chatgpt-route-inspector-userscript/main/chatgpt-route-inspector.user.js
@@ -435,19 +435,111 @@
     const id = conv();
     return records.find(r => r.source === view && (id ? r.conversationId === id : r.visit === visit));
   }
+  // Positions contain only panel coordinates and are independent of network records.
+  const POSITION_KEY = KEY + '.positions';
+  const positions = {};
+  let dragState = null, suppressClickUntil = 0, panelResizeObserver;
+  try {
+    const savedPositions = JSON.parse(localStorage.getItem(POSITION_KEY) || '{}');
+    for (const name of ['full', 'compact', 'edge']) {
+      const p = savedPositions?.[name];
+      if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) positions[name] = { x: p.x, y: p.y };
+    }
+  } catch { /* A damaged layout must not prevent network inspection. */ }
+  function savePositions() {
+    try { localStorage.setItem(POSITION_KEY, JSON.stringify(positions)); }
+    catch { /* Dragging remains available when storage is unavailable. */ }
+  }
+  function clampPosition(x, y, width, height) {
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    return {
+      x: mode === 'edge' ? Math.max(0, viewportWidth - width) : Math.max(0, Math.min(x, Math.max(0, viewportWidth - width))),
+      y: Math.max(0, Math.min(y, Math.max(0, viewportHeight - height)))
+    };
+  }
+  function setPanelPosition(p) {
+    host.style.left = mode === 'edge' ? 'auto' : p.x + 'px';
+    host.style.right = mode === 'edge' ? '0px' : 'auto';
+    host.style.top = p.y + 'px';
+    host.style.bottom = 'auto';
+  }
+  function positionPanel() {
+    if (!alive || !host?.isConnected || dragState) return;
+    host.style.width = mode === 'edge' ? '36px' : 'auto';
+    const savedPosition = positions[mode];
+    if (savedPosition) setPanelPosition(savedPosition);
+    else {
+      host.style.left = 'auto'; host.style.right = mode === 'edge' ? '0px' : '16px';
+      host.style.top = 'auto'; host.style.bottom = '24px';
+    }
+    const rect = host.getBoundingClientRect();
+    setPanelPosition(clampPosition(rect.left, rect.top, rect.width, rect.height));
+  }
+  function startPanelDrag(event) {
+    suppressClickUntil = 0;
+    if (dragState || event.button !== 0 || !event.isPrimary) return;
+    const handle = event.target.closest('[data-drag-handle]');
+    if (!handle || (handle.matches('header') && event.target.closest('button, a, input, select, textarea'))) return;
+    const rect = host.getBoundingClientRect();
+    dragState = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: rect.left, y: rect.top, width: rect.width, height: rect.height, moving: false };
+    event.stopPropagation();
+  }
+  function movePanelDrag(event) {
+    const state = dragState;
+    if (!state || state.pointerId !== event.pointerId) return;
+    const dx = event.clientX - state.startX, dy = event.clientY - state.startY;
+    if (!state.moving && Math.hypot(dx, dy) < 5) return;
+    if (!state.moving) { try { host.setPointerCapture(event.pointerId); } catch { /* Window listeners retain the drag. */ } }
+    state.moving = true;
+    host.setAttribute('data-dragging', '');
+    const p = clampPosition(state.x + dx, state.y + dy, state.width, state.height);
+    setPanelPosition(p); positions[mode] = p;
+    event.preventDefault(); event.stopPropagation();
+  }
+  function finishPanelDrag(event) {
+    const state = dragState;
+    if (!state || state.pointerId !== event.pointerId) return;
+    dragState = null;
+    host.removeAttribute('data-dragging');
+    if (state.moving) { suppressClickUntil = performance.now() + 400; savePositions(); }
+    if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId);
+    positionPanel(); schedule();
+  }
+  function suppressDragClick(event) {
+    if (event.detail !== 0 && performance.now() < suppressClickUntil) {
+      suppressClickUntil = 0; event.preventDefault(); event.stopImmediatePropagation();
+    }
+  }
   function mount() {
     if (!alive || host?.isConnected || !document.documentElement) return;
     host = document.createElement('div'); host.id = 'cgri-userscript'; host.style.cssText = 'all:initial;position:fixed;right:16px;bottom:24px;z-index:2147483646;max-width:calc(100vw - 24px);';
     root = host.attachShadow({ mode: 'open' });
     root.innerHTML = `<style>
       :host{color-scheme:dark}#shell{font:13px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;color:#f1f5f9}header strong,dd,.item{color:#f1f5f9}dt{font-weight:500}dd{font-weight:500}
+      [data-drag-handle]{cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}:host([data-dragging]) [data-drag-handle]{cursor:grabbing}
       *{box-sizing:border-box}button,select{font:inherit}button{cursor:pointer;border:1px solid #425169;border-radius:7px;background:#263348;color:#edf4ff;padding:5px 9px}button:hover{background:#364861}button:focus-visible,summary:focus-visible{outline:2px solid #59c8ff;outline-offset:2px}
-      #panel{width:366px;max-width:calc(100vw - 24px);background:#111c2d;border:1px solid #526580;border-radius:13px;box-shadow:0 8px 32px #0006;overflow:hidden}header{display:flex;align-items:center;gap:6px;padding:10px 12px;background:#1c2a3e}header strong{flex:1;font-size:14px}nav{display:flex;gap:5px;padding:9px 12px 0}nav button[aria-pressed=true]{border-color:#50c5e7;color:#a5f3fc}.body{padding:10px 12px}.badge{color:#a5e1ff;font-weight:600;margin-bottom:8px}dl{display:grid;grid-template-columns:83px 1fr;gap:6px 10px;margin:0}dt{color:#c1cede}dd{margin:0;overflow-wrap:anywhere}small,.muted{color:#b8c6d9}footer{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px 12px}details{margin-top:9px}summary{cursor:pointer;color:#c6d8ed}pre{color:#e2e8f0;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 ui-monospace,monospace;max-height:220px;overflow:auto;background:#090f1b;border-radius:6px;padding:8px}.history{max-height:min(370px,55vh);overflow:auto;border-top:1px solid #3b4e66;padding:10px 12px}.item{padding:7px 0;border-bottom:1px solid #33445b;overflow-wrap:anywhere}.item small{display:block}#compact{max-width:270px;background:#18263d;color:#f1f5f9;padding:10px 14px;border-radius:12px;text-align:left;overflow-wrap:anywhere}#edge{border-radius:10px 0 0 10px;padding:13px 7px;background:#1c3b52;color:#a9eaff;writing-mode:vertical-rl}#notice{color:#fcd34d;font-size:12px;margin-top:6px}#notice:empty{display:none}#panel{max-height:85vh;overflow:auto}@media(max-width:480px){#panel{width:330px}header{padding:8px}header strong{font-size:13px}}
+      #panel{width:366px;max-width:calc(100vw - 24px);background:#111c2d;border:1px solid #526580;border-radius:13px;box-shadow:0 8px 32px #0006;overflow:hidden}header{display:flex;align-items:center;gap:6px;padding:10px 12px;background:#1c2a3e}header strong{flex:1;font-size:14px}nav{display:flex;gap:5px;padding:9px 12px 0}nav button[aria-pressed=true]{border-color:#50c5e7;color:#a5f3fc}.body{padding:10px 12px}.badge{color:#a5e1ff;font-weight:600;margin-bottom:8px}dl{display:grid;grid-template-columns:83px 1fr;gap:6px 10px;margin:0}dt{color:#c1cede}dd{margin:0;overflow-wrap:anywhere}small,.muted{color:#b8c6d9}footer{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px 12px}details{margin-top:9px}summary{cursor:pointer;color:#c6d8ed}pre{color:#e2e8f0;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 ui-monospace,monospace;max-height:220px;overflow:auto;background:#090f1b;border-radius:6px;padding:8px}.history{max-height:min(370px,55vh);overflow:auto;border-top:1px solid #3b4e66;padding:10px 12px}.item{padding:7px 0;border-bottom:1px solid #33445b;overflow-wrap:anywhere}.item small{display:block}#compact{max-width:270px;background:#18263d;color:#f1f5f9;padding:10px 14px;border-radius:12px;text-align:left;overflow-wrap:anywhere}#edge{display:block;width:100%;border-radius:10px 0 0 10px;padding:13px 7px;background:#1c3b52;color:#a9eaff;writing-mode:vertical-rl}#notice{color:#fcd34d;font-size:12px;margin-top:6px}#notice:empty{display:none}#panel{max-height:85vh;overflow:auto}@media(max-width:480px){#panel{width:330px}header{padding:8px}header strong{font-size:13px}}
       </style><section id="shell"></section>`;
+    root.addEventListener('pointerdown', startPanelDrag);
+    window.addEventListener('pointermove', movePanelDrag, true);
+    window.addEventListener('pointerup', finishPanelDrag, true);
+    window.addEventListener('pointercancel', finishPanelDrag, true);
+    host.addEventListener('lostpointercapture', finishPanelDrag);
+    host.addEventListener('click', suppressDragClick, true);
+    window.addEventListener('resize', positionPanel);
+    panelResizeObserver?.disconnect();
+    if (typeof ResizeObserver === 'function') {
+      panelResizeObserver = new ResizeObserver(positionPanel);
+      panelResizeObserver.observe(host);
+    }
     root.addEventListener('click', event => {
       const action = event.target.closest('[data-action]')?.dataset.action;
       if (!action) return;
-      if (action === 'compact' || action === 'edge' || action === 'full') { mode = action; save(); }
+      if (action === 'compact' || action === 'edge' || action === 'full') {
+        if (!positions[action]) { const rect = host.getBoundingClientRect(); positions[action] = { x: rect.left, y: rect.top }; }
+        mode = action; savePositions(); save();
+      }
       if (action === 'live' || action === 'reload') view = action;
       if (action === 'history') historyOpen = !historyOpen;
       if (action === 'pause') { paused = !paused; epoch++; pending.clear(); for (const reader of readers) void reader.cancel().catch(() => {}); for (const state of sockets.values()) state.topics.clear(); }
@@ -462,14 +554,13 @@
   function date(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'; }
   function evidence(r) { return r ? { ...clean(r), assessment: assessment(r) } : {}; }
   function render() {
-    if (!alive || !root) return;
+    if (!alive || !root || dragState) return;
     const shell = root.querySelector('#shell'), r = current(), a = assessment(r || {}), val = x => escape(x);
-    host.style.right = mode === 'edge' ? '0px' : '16px';
-    if (mode === 'edge') { shell.innerHTML = '<button id="edge" data-action="full" title="展开路由检测器">路由检测</button>'; return; }
-    if (mode === 'compact') { shell.innerHTML = `<button id="compact" data-action="full" title="展开完整面板">${paused ? '已暂停 · ' : ''}${val(a.route || r?.modelLabel || '等待路由')}<br><small>PoW ${val(pow?.decimal)} · 点击展开</small></button>`; return; }
+    if (mode === 'edge') { shell.innerHTML = '<button id="edge" data-drag-handle data-action="full" title="上下拖动；点击展开路由检测器">路由检测</button>'; positionPanel(); return; }
+    if (mode === 'compact') { shell.innerHTML = `<button id="compact" data-drag-handle data-action="full" title="拖动移动；点击展开完整面板">${paused ? '已暂停 · ' : ''}${val(a.route || r?.modelLabel || '等待路由')}<br><small>PoW ${val(pow?.decimal)} · 点击展开</small></button>`; positionPanel(); return; }
     const open = root.querySelector('details')?.open;
     const q = r?.quota || quota;
-    shell.innerHTML = `<section id="panel" aria-label="ChatGPT 路由检测器"><header><strong>◉ ChatGPT 路由检测</strong><button data-action="compact" title="极简模式" aria-label="极简模式">−</button><button data-action="edge" title="收纳到边缘" aria-label="收纳到边缘">›</button></header>
+    shell.innerHTML = `<section id="panel" aria-label="ChatGPT 路由检测器"><header data-drag-handle title="拖动移动面板"><strong>◉ ChatGPT 路由检测</strong><button data-action="compact" title="极简模式" aria-label="极简模式">−</button><button data-action="edge" title="收纳到边缘" aria-label="收纳到边缘">›</button></header>
       <nav aria-label="记录来源"><button data-action="live" aria-pressed="${view === 'live'}">实时请求</button><button data-action="reload" aria-pressed="${view === 'reload'}">会话重载</button><button data-action="pause">${paused ? '恢复采集' : '暂停'}</button></nav>
       <div class="body"><div class="badge">${paused ? '采集已暂停' : val(a.verdict)}</div><dl>
       <dt>请求模型</dt><dd>${val(r?.requestedModel)}</dd><dt>响应路由</dt><dd>${val(a.route)}</dd><dt>证据来源</dt><dd>${val(a.basis)}</dd><dt>模型标签</dt><dd>${val(r?.modelLabel || r?.domLabel)}</dd><dt>推理强度</dt><dd>${val(r?.thinkingEffort)}</dd><dt>状态</dt><dd>${val(r?.status || '等待当前会话的网络响应')}</dd><dt>PoW 难度</dt><dd>${val(pow?.decimal)}${pow ? ` <small>(0x${val(pow.hex.replace(/^0x/i, ''))})</small>` : ''}</dd>
@@ -477,9 +568,10 @@
       <div id="notice">${val(storageError || '')}</div><small>仅观察页面已有网络响应 · 本机最多 ${MAX_HISTORY} 条记录</small></div>
       <footer><button data-action="history">${historyOpen ? '收起记录' : `本机记录 (${records.length})`}</button><button data-action="json">导出 JSON</button><button data-action="md">导出 Markdown</button></footer>
       ${historyOpen ? `<section class="history" aria-label="本机记录"><button data-action="clear">清空记录</button>${records.map(item => { const x = assessment(item); return `<div class="item"><small>${val(date(item.time))} · ${item.source === 'live' ? '实时' : '重载'} · ${val(item.status)}</small>${val(item.requestedModel)} → ${val(x.route || item.modelLabel)}<small>${val(x.verdict)}</small></div>`; }).join('') || '<p>暂无记录</p>'}</section>` : ''}</section>`;
+    positionPanel();
   }
   function report(format) {
-    const payload = { tool: 'ChatGPT Route Inspector Userscript', version: '1.0.0', exportedAt: now(), records: records.map(evidence) };
+    const payload = { tool: 'ChatGPT Route Inspector Userscript', version: '1.1.0', exportedAt: now(), records: records.map(evidence) };
     if (format === 'json') return JSON.stringify(payload, null, 2);
     return '# ChatGPT 路由检测报告\n\n导出时间：' + payload.exportedAt + '\n\n' + payload.records.map(r => `## ${r.time}\n\n- 来源：${r.source}\n- 请求模型：${r.requestedModel || '—'}\n- 响应路由：${r.assessment.route || '—'}\n- 判断：${r.assessment.verdict}\n\n\x60\x60\x60json\n${JSON.stringify(r, null, 2)}\n\x60\x60\x60`).join('\n\n');
   }
@@ -504,6 +596,12 @@
   function destroy() {
     if (!alive) return;
     alive = false; epoch++;
+    dragState = null;
+    panelResizeObserver?.disconnect();
+    window.removeEventListener('resize', positionPanel);
+    window.removeEventListener('pointermove', movePanelDrag, true);
+    window.removeEventListener('pointerup', finishPanelDrag, true);
+    window.removeEventListener('pointercancel', finishPanelDrag, true);
     clearInterval(timer); clearTimeout(renderTimer); clearTimeout(saveTimer);
     for (const reader of readers) void reader.cancel().catch(() => {});
     for (const [socket, state] of sockets) { socket.removeEventListener('message', state.onMessage); socket.removeEventListener('close', state.onClose); state.topics.clear(); }
@@ -515,6 +613,6 @@
     if (window[API]?.destroy === destroy) delete window[API];
   }
   // Developer API exposes only the same filtered metadata available in the UI.
-  Object.defineProperty(window, API, { configurable: true, value: Object.freeze({ version: '1.0.0', destroy, snapshot: () => ({ paused, mode, records: records.map(evidence), pow, quota }), report }) });
+  Object.defineProperty(window, API, { configurable: true, value: Object.freeze({ version: '1.1.0', destroy, snapshot: () => ({ paused, mode, records: records.map(evidence), pow, quota }), report }) });
   timer = setInterval(tick, 1000); tick();
 })();

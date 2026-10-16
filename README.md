@@ -2,9 +2,9 @@
 
 在 ChatGPT 页面查看请求模型、响应路由、模型标签、PoW 和额度快照。无需构建，无外部依赖。
 
-[安装 Chrome 原版 v1.0.0](https://raw.githubusercontent.com/B416-JAFLY/chatgpt-route-inspector-userscript/main/chatgpt-route-inspector.user.js) · [查看脚本源码](./chatgpt-route-inspector.user.js)
+[安装 Chrome 版 v1.1.0](https://raw.githubusercontent.com/B416-JAFLY/chatgpt-route-inspector-userscript/main/chatgpt-route-inspector.user.js) · [查看脚本源码](./chatgpt-route-inspector.user.js)
 
-[安装 Safari 版 v1.0.2](https://raw.githubusercontent.com/B416-JAFLY/chatgpt-route-inspector-userscript/main/chatgpt-route-inspector-safari.user.js) · [查看 Safari 版源码](./chatgpt-route-inspector-safari.user.js)
+[安装 Safari 版 v1.1.0](https://raw.githubusercontent.com/B416-JAFLY/chatgpt-route-inspector-userscript/main/chatgpt-route-inspector-safari.user.js) · [查看 Safari 版源码](./chatgpt-route-inspector-safari.user.js)
 
 ![高对比度检测面板](./preview.png)
 
@@ -37,10 +37,16 @@ Safari 版将监听代码作为页面脚本显式注入，优先复用页面已�
 - 支持 fetch、SSE、delta v1、XHR，以及通过主题或输入消息 ID 关联的 WebSocket 接力。
 - 显示 PoW 原始十六进制值及高精度十进制换算。
 - 读取响应中已有的深度研究、图片生成剩余额度与重置时间；详情中的额度带捕获时间。
-- 完整面板、极简模式、右侧边缘收纳、暂停与恢复。
+- 完整面板、极简模式、右侧边缘收纳、暂停与恢复；三种模式均支持拖动。
 - 本机最多保存 100 条元数据记录，可导出 JSON 或 Markdown。
 
 标题和字段值为近白色 `#f1f5f9`，面板背景为深蓝 `#111c2d`，正文对比度约 15.6:1。字段名对比度约 10.7:1。采用 Shadow DOM 隔离样式。
+
+## 移动面板（v1.1.0）
+
+完整模式按住顶部标题栏拖动；极简模式按住整个按钮拖动，直接点击仍可展开。边缘收纳模式按住竖条上下拖动，竖条始终贴住窗口右侧；拖动结束不会触发展开。
+
+各模式的位置分别保存在本机，刷新后恢复。切换模式、面板内容变化或窗口缩小时，会自动把面板限制在可见范围内。标题栏上的按钮继续响应点击，不作为拖动区域。
 
 ## 字段说明
 
@@ -71,7 +77,7 @@ PoW 为本页最近捕获值；记录中的 PoW、额度是各自捕获时的快
 
 Safari 27.0.1、Tampermonkey 5.6.6243 下实际安装 Safari 1.0.2 后，用户发送消息并取得 HTTP 200、状态“已完成”的实时记录。请求模型、`resolved_model_slug`、`server_ste_metadata.model_slug` 和模型标签均为 `gpt-6-thinking`，推理强度为 `extended`；PoW 与深度研究、图片生成额度快照也已读取。
 
-本地自动检查使用分开的页面与扩展 JavaScript 环境，覆盖页面 nonce 注入、启动回执、注入被阻止时的提示、网络监听计数及响应字段提取。模拟测试不替代其他 Safari 版本或所有功能的实际验证。Chrome 原版文件保持不变。
+本地自动检查使用分开的页面与扩展 JavaScript 环境，覆盖页面 nonce 注入、启动回执、注入被阻止时的提示、网络监听计数及响应字段提取。模拟测试不替代其他 Safari 版本或所有功能的实际验证。Safari 版沿用已经实际验证的页面注入方式。
 
 ## 参考
 
@@ -79,3 +85,9 @@ Safari 27.0.1、Tampermonkey 5.6.6243 下实际安装 Safari 1.0.2 后，用户�
 
 界面预览见本页顶部。
 
+
+## 拖动功能验证
+
+Chrome 与 Safari 两份 v1.1.0 脚本均已在独立 Chromium、WebKit 测试浏览器中完成三种模式拖动、普通点击展开、拖动后禁止误展开、位置保存与刷新恢复、窗口缩小后的可见范围限制，以及拖动期间响应更新的检查。这些测试未操作用户的 Safari 标签页；Safari 扩展中的新增拖动功能仍需实际使用确认。
+
+启动与注入回归测试：`node --test tests/safari-bootstrap.test.cjs`。浏览器交互测试：安装 Playwright 及 Chromium、WebKit 测试引擎后，执行 `node tests/panel-drag.browser.cjs`。测试页面与网络响应均在本地模拟，不使用 ChatGPT 登录状态。

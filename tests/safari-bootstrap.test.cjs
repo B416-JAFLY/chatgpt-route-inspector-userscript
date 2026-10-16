@@ -14,11 +14,13 @@ function environment({ blocked = false, nonce = 'test-page-nonce' } = {}) {
     querySelectorAll: q => q === 'script[nonce]' && nonce ? [{ nonce }] : [],
     getElementById: id => elements.get(id) || null,
     createElement: tag => ({
-      tag, style: {}, isConnected: false, textContent: '', remove() {}, click() {},
+      tag, style: {}, isConnected: false, textContent: '', remove() {}, click() {}, addEventListener() {},
+      getBoundingClientRect: () => ({ left: 16, top: 24, width: 366, height: 500 }),
       attachShadow: () => ({ innerHTML: '', addEventListener() {}, querySelector: q => q === '#shell' ? shell : null })
     })
   };
   const parent = {
+    clientWidth: 1280, clientHeight: 800,
     getAttribute: k => attrs.get(k), setAttribute: (k, v) => attrs.set(k, v),
     appendChild(el) {
       if (el.tag === 'script') {
@@ -31,7 +33,7 @@ function environment({ blocked = false, nonce = 'test-page-nonce' } = {}) {
   document.documentElement = document.head = parent;
   const location = { hostname: 'chatgpt.com', origin: 'https://chatgpt.com', href: 'https://chatgpt.com/c/test', pathname: '/c/test', search: '' };
   const shared = {
-    document, location, crypto: webcrypto, URL, Request, TextDecoder, structuredClone, performance,
+    document, location, innerWidth: 1280, innerHeight: 800, addEventListener() {}, removeEventListener() {}, crypto: webcrypto, URL, Request, TextDecoder, structuredClone, performance,
     setTimeout: fn => (timeouts.push(fn), timeouts.length), clearTimeout() {}, setInterval: () => 1, clearInterval() {},
     MutationObserver: class { observe() {} disconnect() {} },
     PerformanceObserver: class { constructor(cb) { resourceCallback = cb; } observe() {} disconnect() {} }
@@ -60,10 +62,10 @@ test('injects into the page, acknowledges startup and leaves extension globals a
   assert.equal(e.outer.fetch, e.outerFetch);
   assert.notEqual(e.app.fetch, e.originalPageFetch);
   const api = e.app.__chatgptRouteInspectorUserscript;
-  assert.equal(api.version, '1.0.2');
+  assert.equal(api.version, '1.1.0');
   assert(e.attrs.has('data-cgri-page-bootstrap'));
   assert(e.elements.has('cgri-userscript'));
-  assert(e.shell.innerHTML.includes('Safari 诊断（1.0.2 · 页面注入）'));
+  assert(e.shell.innerHTML.includes('Safari 诊断（1.1.0 · 页面注入）'));
   assert.equal(e.nativeCalls, 0, 'installation must not issue extra requests');
   const result = e.app.fetch('/backend-api/conversation', { body: JSON.stringify({ model: 'test-model', conversation_id: 'test' }) });
   assert.equal(result, e.nativePromise, 'return the original fetch promise');
